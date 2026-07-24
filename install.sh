@@ -5,9 +5,9 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.7.1"
+DEFAULT_VERSION="v1.7.2"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="e4a8ce0d53d7a8dd526472cefb10684a6be5fe079a5cac3478a69675bec4e0c4"
+DEFAULT_ARCHIVE_SHA256="fd50e8a5190c6ed216d603a42c9207f39c86252c278ba4fe54361fd3c2c9bcac"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
