@@ -5,9 +5,9 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.3.0"
+DEFAULT_VERSION="v1.3.1"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="0f9d2dc1f0f25d8e27260dddce4e03479b328cc96f914c1747abac89ec098cf8"
+DEFAULT_ARCHIVE_SHA256="ef9acfe2c7e93558a0ec65a12286092f334341a8cc00a0430d8c1fe7e6b1d1ba"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -298,16 +298,19 @@ read_service_value() {
   printf '%s\n' "$value"
 }
 
-detect_interface() {
-  ip -4 route show default 2>/dev/null |
-    awk '{
-      for (index = 1; index <= NF; index++) {
-        if ($index == "dev" && index < NF) {
-          print $(index + 1)
+extract_default_interface() {
+  awk '{
+      for (field_index = 1; field_index <= NF; field_index++) {
+        if ($field_index == "dev" && field_index < NF) {
+          print $(field_index + 1)
           exit
         }
       }
     }'
+}
+
+detect_interface() {
+  ip -4 route show default 2>/dev/null | extract_default_interface
 }
 
 detect_public_ipv4() {
@@ -337,7 +340,7 @@ detect_prefixes() {
 }
 
 open_prompt_tty() {
-  if exec 3<>/dev/tty 2>/dev/null; then
+  if { exec 3<>/dev/tty; } 2>/dev/null; then
     PROMPT_FD=3
   fi
 }
@@ -431,7 +434,7 @@ usage() {
 Usage: bash quick_install.sh [options]
 
 Options:
-  --version vX.Y.Z             Install one fixed release (default: v1.3.0)
+  --version vX.Y.Z             Install one fixed release (default: v1.3.1)
   --repository OWNER/REPO      Public distribution repository
   --archive-sha256 HEX         Required unless embedded by the release builder
   --yes                        Accept the final confirmation
