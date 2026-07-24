@@ -5,9 +5,9 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.6.0"
+DEFAULT_VERSION="v1.7.0"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="576c2623dc6376f420d8f7f8d49e84d0e04fa9bbbf788c93f16d49f241bf7791"
+DEFAULT_ARCHIVE_SHA256="5602bc2a63b92db187d37edc2a3c63e43a466aa9506d14a24e925a359fd15e43"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -161,6 +161,7 @@ validate_archive_entries() {
       ""|\
       bin|bin/vinted-ipv6-linux-amd64|\
       web|web/index.html|web/app.js|web/styles.css|\
+      web/customer|web/customer/index.html|web/customer/client.js|web/customer/client.css|\
       deployment|\
       deployment/install_admin_console.sh|\
       deployment/rollback_admin_console.sh|\
@@ -197,6 +198,9 @@ verify_payload() {
     deployment/verify_ipv6_prefix.sh
     deployment/vinted-ipv6.service
     web/app.js
+    web/customer/client.css
+    web/customer/client.js
+    web/customer/index.html
     web/index.html
     web/styles.css
   )
@@ -206,6 +210,9 @@ verify_payload() {
     web/index.html \
     web/app.js \
     web/styles.css \
+    web/customer/index.html \
+    web/customer/client.js \
+    web/customer/client.css \
     deployment/install_admin_console.sh \
     deployment/rollback_admin_console.sh \
     deployment/systemd_env.sh \
