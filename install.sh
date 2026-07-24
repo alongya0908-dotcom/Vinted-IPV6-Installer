@@ -5,9 +5,9 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.3.3"
+DEFAULT_VERSION="v1.4.0"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="497ff037194d6a491c0d1f1ff3e5e0142e47919ee098c5d636f6815155c0cf2d"
+DEFAULT_ARCHIVE_SHA256="4eebd7bf473fc64b80e5cf8121c886ddef8714211a33b9da9bb03e466fa77b6e"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -434,7 +434,7 @@ usage() {
 Usage: bash quick_install.sh [options]
 
 Options:
-  --version vX.Y.Z             Install one fixed release (default: v1.3.2)
+  --version vX.Y.Z             Install one fixed release (default: current pinned release)
   --repository OWNER/REPO      Public distribution repository
   --archive-sha256 HEX         Required unless embedded by the release builder
   --yes                        Accept the final confirmation
