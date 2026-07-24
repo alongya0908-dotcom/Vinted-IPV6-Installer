@@ -5,9 +5,9 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.7.0"
+DEFAULT_VERSION="v1.7.1"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="5602bc2a63b92db187d37edc2a3c63e43a466aa9506d14a24e925a359fd15e43"
+DEFAULT_ARCHIVE_SHA256="e4a8ce0d53d7a8dd526472cefb10684a6be5fe079a5cac3478a69675bec4e0c4"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -161,7 +161,8 @@ validate_archive_entries() {
       ""|\
       bin|bin/vinted-ipv6-linux-amd64|\
       web|web/index.html|web/app.js|web/styles.css|\
-      web/customer|web/customer/index.html|web/customer/client.js|web/customer/client.css|\
+      web/customer|web/customer/index.html|web/customer/client.js|web/customer/client.css|web/customer/login.js|\
+      web/customer/portal|web/customer/portal/index.html|\
       deployment|\
       deployment/install_admin_console.sh|\
       deployment/rollback_admin_console.sh|\
@@ -201,6 +202,8 @@ verify_payload() {
     web/customer/client.css
     web/customer/client.js
     web/customer/index.html
+    web/customer/login.js
+    web/customer/portal/index.html
     web/index.html
     web/styles.css
   )
@@ -213,6 +216,8 @@ verify_payload() {
     web/customer/index.html \
     web/customer/client.js \
     web/customer/client.css \
+    web/customer/login.js \
+    web/customer/portal/index.html \
     deployment/install_admin_console.sh \
     deployment/rollback_admin_console.sh \
     deployment/systemd_env.sh \
