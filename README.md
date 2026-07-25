@@ -1,14 +1,14 @@
 # Vinted IPv6 一键安装器
 
 这是 Vinted IPv6 代理控制台的公开、无源码安装分发仓库。安装器固定到
-`v1.8.0` 运行包及其 SHA-256，校验失败会立即停止，不会安装未知文件。
+`v1.8.2` 运行包及其 SHA-256，校验失败会立即停止，不会安装未知文件。
 
 ## 一键安装或升级
 
 先切换到 `root`，再执行：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/alongya0908-dotcom/Vinted-IPV6-Installer/ea83a82b75d753da9ab4d298ceaf450354d16064/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/alongya0908-dotcom/Vinted-IPV6-Installer/main/install.sh)
 ```
 
 - 首次安装会交互询问管理员、监听端口、IPv6 `/48` 前缀等必要配置。
@@ -19,8 +19,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/alongya0908-dotcom/Vinted-IP
 无人值守升级已有服务器：
 
 ```bash
-VINTED_IPV6_ASSUME_YES=1 bash <(curl -fsSL https://raw.githubusercontent.com/alongya0908-dotcom/Vinted-IPV6-Installer/ea83a82b75d753da9ab4d298ceaf450354d16064/install.sh)
+VINTED_IPV6_ASSUME_YES=1 bash <(curl -fsSL https://raw.githubusercontent.com/alongya0908-dotcom/Vinted-IPV6-Installer/main/install.sh)
 ```
 
 版本化运行包与校验文件见
-[v1.8.0 Release](https://github.com/alongya0908-dotcom/Vinted-IPV6/releases/tag/v1.8.0)。
+[v1.8.2 Release](https://github.com/alongya0908-dotcom/Vinted-IPV6/releases/tag/v1.8.2)。
