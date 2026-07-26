@@ -5,9 +5,9 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.8.5"
+DEFAULT_VERSION="v1.8.6"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="83f6946c90d8baad3dc3ee6bb932c8550b3485886acf3c4b1ea02b7fddab5af9"
+DEFAULT_ARCHIVE_SHA256="65fb174bcc267e7dbf9f8084092dfde41a282c3e782f9eccb26840e73bd025b6"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -44,6 +44,164 @@ validate_ipv4() {
     [[ "$octet" =~ ^[0-9]{1,3}$ ]] || return 1
     (( 10#$octet <= 255 )) || return 1
   done
+}
+
+validate_boolean() {
+  [[ "$1" == "0" || "$1" == "1" ]]
+}
+
+validate_public_domain() {
+  local value="${1,,}" label
+  local -a labels
+  [[ -n "$value" && ${#value} -le 253 ]] || return 1
+  contains_line_break "$value" && return 1
+  [[ "$value" != *".."* && "$value" != .* && "$value" != *. ]] || return 1
+  IFS='.' read -r -a labels <<<"$value"
+  (( ${#labels[@]} >= 2 )) || return 1
+  for label in "${labels[@]}"; do
+    [[ ${#label} -ge 1 && ${#label} -le 63 ]] || return 1
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 1
+  done
+}
+
+derive_sslip_domain() {
+  validate_ipv4 "$1" || return 1
+  printf '%s.sslip.io\n' "${1//./-}"
+}
+
+write_trusted_https_nginx_config() {
+  local domain="$1" management_port="$2" destination="$3"
+  validate_public_domain "$domain" || return 1
+  validate_port "$management_port" || return 1
+  cat >"$destination" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain;
+
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass https://127.0.0.1:$management_port;
+        proxy_ssl_verify off;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+    }
+}
+EOF
+}
+
+configure_trusted_https() {
+  local public_ipv4="$1" domain="$2" management_port="$3"
+  local backup_dir config_path config_temp package_attempt resolved
+  local packages_ready=0 previous_config=0
+
+  validate_ipv4 "$public_ipv4" || return 1
+  validate_public_domain "$domain" || return 1
+  validate_port "$management_port" || return 1
+  command -v apt-get >/dev/null 2>&1 || {
+    echo "Trusted HTTPS requires apt-get on the supported Ubuntu host." >&2
+    return 1
+  }
+  command -v getent >/dev/null 2>&1 || {
+    echo "Trusted HTTPS requires getent for the preflight DNS check." >&2
+    return 1
+  }
+
+  resolved="$(
+    getent ahostsv4 "$domain" 2>/dev/null |
+      awk '$2 == "STREAM" { print $1 }' |
+      sort -u
+  )"
+  grep -Fqx "$public_ipv4" <<<"$resolved" || {
+    echo "Trusted HTTPS skipped: $domain does not resolve to $public_ipv4." >&2
+    return 1
+  }
+
+  if command -v nginx >/dev/null 2>&1 &&
+     command -v certbot >/dev/null 2>&1 &&
+     dpkg-query -W -f='${Status}\n' python3-certbot-nginx 2>/dev/null |
+       grep -Fqx 'install ok installed'; then
+    packages_ready=1
+  else
+    export DEBIAN_FRONTEND=noninteractive
+    for package_attempt in 1 2 3 4 5; do
+      if apt-get update &&
+         apt-get install -y nginx certbot python3-certbot-nginx; then
+        packages_ready=1
+        break
+      fi
+      echo "Package manager is busy; retrying trusted HTTPS setup ($package_attempt/5)." >&2
+      sleep 3
+    done
+  fi
+  (( packages_ready == 1 )) || return 1
+  for required_command in certbot nginx; do
+    command -v "$required_command" >/dev/null 2>&1 || return 1
+  done
+
+  if command -v ufw >/dev/null 2>&1 &&
+     ufw status 2>/dev/null | grep -Fq 'Status: active'; then
+    ufw allow 80/tcp >/dev/null || return 1
+    ufw allow 443/tcp >/dev/null || return 1
+  fi
+
+  backup_dir="/var/backups/vinted-ipv6/tls-proxy-$(date -u +%Y%m%dT%H%M%SZ)"
+  install -d -m 0700 "$backup_dir" || return 1
+  config_path="/etc/nginx/sites-available/vinted-ipv6-tls"
+  if [[ -e "$config_path" || -L "$config_path" ]]; then
+    cp -a "$config_path" "$backup_dir/" || return 1
+    previous_config=1
+  fi
+  config_temp="$(mktemp /tmp/vinted-ipv6-nginx.XXXXXXXX)"
+  if ! write_trusted_https_nginx_config \
+      "$domain" "$management_port" "$config_temp"; then
+    rm -f -- "$config_temp"
+    return 1
+  fi
+  install -m 0644 "$config_temp" "$config_path" || {
+    rm -f -- "$config_temp"
+    return 1
+  }
+  rm -f -- "$config_temp"
+  ln -sfn "$config_path" /etc/nginx/sites-enabled/vinted-ipv6-tls ||
+    return 1
+  if ! nginx -t || ! systemctl enable --now nginx; then
+    if (( previous_config == 1 )); then
+      cp -a "$backup_dir/vinted-ipv6-tls" "$config_path"
+    else
+      rm -f -- /etc/nginx/sites-enabled/vinted-ipv6-tls "$config_path"
+    fi
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  if ! certbot --nginx -d "$domain" \
+      --non-interactive --agree-tos --register-unsafely-without-email \
+      --redirect --keep-until-expiring ||
+     ! nginx -t ||
+     ! systemctl reload nginx ||
+     ! curl --fail --silent --show-error --max-time 20 \
+       "https://$domain/healthz" >/dev/null; then
+    if (( previous_config == 1 )); then
+      cp -a "$backup_dir/vinted-ipv6-tls" "$config_path"
+    else
+      rm -f -- /etc/nginx/sites-enabled/vinted-ipv6-tls "$config_path"
+    fi
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+    return 1
+  fi
+  systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+  /usr/local/bin/vinted-ipv6 \
+    -data-dir /var/lib/vinted-ipv6 \
+    -set-public-host "$domain" >/dev/null || return 1
+  printf '%s\n' "$backup_dir" >/var/lib/vinted-ipv6/tls-proxy-last-backup
+  chmod 0600 /var/lib/vinted-ipv6/tls-proxy-last-backup
 }
 
 normalize_prefix() {
@@ -451,6 +609,8 @@ Options:
   --archive-sha256 HEX         Required unless embedded by the release builder
   --yes                        Accept the final confirmation
   --skip-ipv6-egress-check     Skip the real random /128 outbound test
+  --public-domain DOMAIN       Use an existing DNS name for trusted HTTPS
+  --skip-trusted-https         Keep only the self-signed :8443 fallback
   --allow-downgrade            Permit an older version (requires confirmation)
   --help                       Show this help
 
@@ -465,6 +625,8 @@ main() {
   local archive_sha256_pin="${VINTED_IPV6_ARCHIVE_SHA256:-$DEFAULT_ARCHIVE_SHA256}"
   local assume_yes="${VINTED_IPV6_ASSUME_YES:-0}"
   local skip_egress_check="${VINTED_IPV6_SKIP_EGRESS_CHECK:-0}"
+  local trusted_https="${VINTED_IPV6_TRUSTED_HTTPS:-1}"
+  local public_domain="${IPV6_PUBLIC_DOMAIN:-}"
   local allow_downgrade="${VINTED_IPV6_ALLOW_DOWNGRADE:-0}"
   local current_install=0 installed_version="" default_value=""
   local admin_status="" existing_listen="" existing_reserved=""
@@ -473,7 +635,7 @@ main() {
   local archive_path checksum_path expected_sha actual_sha expected_count
   local root_name extract_dir payload_root
   local package_sha release_dir random_hex test_address
-  local admin_url install_exit
+  local admin_url install_exit trusted_https_ready=0 tls_backup=""
 
   while (( $# > 0 )); do
     case "$1" in
@@ -500,6 +662,15 @@ main() {
         skip_egress_check=1
         shift
         ;;
+      --public-domain)
+        (( $# >= 2 )) || die "--public-domain requires a value."
+        public_domain="${2,,}"
+        shift 2
+        ;;
+      --skip-trusted-https)
+        trusted_https=0
+        shift
+        ;;
       --allow-downgrade)
         allow_downgrade=1
         shift
@@ -524,10 +695,12 @@ main() {
   validate_archive_sha256_pin "$archive_sha256_pin" ||
     die "This installer is not release-pinned; use a generated installer or supply --archive-sha256 with exactly 64 hexadecimal characters."
   archive_sha256_pin="${archive_sha256_pin,,}"
+  validate_boolean "$trusted_https" ||
+    die "VINTED_IPV6_TRUSTED_HTTPS must be 0 or 1."
 
   for command_name in \
     awk bash chmod cmp cp curl flock grep install ip mktemp mv openssl rm \
-    sha256sum ss stat systemctl tar uname; do
+    sha256sum sort ss stat systemctl tar uname; do
     command -v "$command_name" >/dev/null 2>&1 ||
       die "Required command is missing: $command_name"
   done
@@ -588,6 +761,19 @@ main() {
   fi
   validate_ipv4 "$IPV6_PUBLIC_IPV4" ||
     die "Invalid public IPv4 address: $IPV6_PUBLIC_IPV4"
+  if [[ "$trusted_https" == "1" ]]; then
+    if [[ -z "$public_domain" ]]; then
+      public_domain="$(derive_sslip_domain "$IPV6_PUBLIC_IPV4")"
+    fi
+    public_domain="${public_domain,,}"
+    validate_public_domain "$public_domain" ||
+      die "Invalid trusted HTTPS domain: $public_domain"
+    # Keep proxy/export URLs on the raw IPv4 fallback until certificate
+    # issuance and the external health check both succeed.
+    IPV6_PUBLIC_HOST="$IPV6_PUBLIC_IPV4"
+  else
+    IPV6_PUBLIC_HOST="$IPV6_PUBLIC_IPV4"
+  fi
 
   default_value="$(detect_prefixes "$IPV6_INTERFACE")"
   if (( current_install == 1 )); then
@@ -731,8 +917,17 @@ main() {
   [[ -n "$installed_version" ]] &&
     echo "  Installed:        $installed_version"
   echo "  Public IPv4:      $IPV6_PUBLIC_IPV4"
+  if [[ "$trusted_https" == "1" ]]; then
+    echo "  Trusted domain:   $public_domain"
+  else
+    echo "  Trusted HTTPS:    disabled"
+  fi
   echo "  IPv6 interface:   $IPV6_INTERFACE"
-  echo "  Management URL:   https://$IPV6_PUBLIC_IPV4$IPV6_LISTEN$IPV6_ADMIN_PATH/"
+  if [[ "$trusted_https" == "1" ]]; then
+    echo "  Management URL:   https://$public_domain$IPV6_ADMIN_PATH/"
+  else
+    echo "  Management URL:   https://$IPV6_PUBLIC_IPV4$IPV6_LISTEN$IPV6_ADMIN_PATH/"
+  fi
   echo "  Reserved ports:   $IPV6_RESERVED_PORTS"
   if (( current_install == 1 )); then
     echo "  Database settings: preserve IPv6 pools, ports, users, traffic, and upstream"
@@ -837,6 +1032,7 @@ main() {
     unset BINARY_PATH WEB_SOURCE SERVICE_SOURCE ROLLBACK_SOURCE
     export \
       IPV6_PUBLIC_IPV4 IPV6_PREFIXES IPV6_INTERFACE IPV6_LISTEN \
+      IPV6_PUBLIC_HOST \
       IPV6_PORT_MIN IPV6_PORT_MAX IPV6_SUBNET_START IPV6_ADMIN_PATH \
       IPV6_RESERVED_PORTS IPV6_ADMIN_USER IPV6_ADMIN_PASSWORD
     if [[ "$configure_upstream" == "1" ]]; then
@@ -857,17 +1053,42 @@ main() {
   unset IPV6_ADMIN_PASSWORD IPV4_UPSTREAM_PASS
   (( install_exit == 0 )) || exit "$install_exit"
 
-  admin_url="https://$IPV6_PUBLIC_IPV4$IPV6_LISTEN$IPV6_ADMIN_PATH/"
+  if [[ "$trusted_https" == "1" ]]; then
+    echo
+    echo "Configuring trusted HTTPS for $public_domain ..."
+    if configure_trusted_https \
+        "$IPV6_PUBLIC_IPV4" "$public_domain" "$IPV6_MANAGEMENT_PORT"; then
+      trusted_https_ready=1
+      tls_backup="$(</var/lib/vinted-ipv6/tls-proxy-last-backup)"
+      admin_url="https://$public_domain$IPV6_ADMIN_PATH/"
+    else
+      echo "WARNING: Trusted HTTPS setup did not complete." >&2
+      echo "The proxy service remains installed and available through the self-signed fallback." >&2
+      admin_url="https://$IPV6_PUBLIC_IPV4$IPV6_LISTEN$IPV6_ADMIN_PATH/"
+    fi
+  else
+    admin_url="https://$IPV6_PUBLIC_IPV4$IPV6_LISTEN$IPV6_ADMIN_PATH/"
+  fi
   echo
   echo "Verified release installed successfully."
   echo "Version: $(/usr/local/bin/vinted-ipv6 -version)"
   echo "Package SHA-256: $package_sha"
   echo "Admin console: $admin_url"
+  if (( trusted_https_ready == 1 )); then
+    echo "Buyer console: https://$public_domain/client/"
+    echo "Trusted HTTPS backup: $tls_backup"
+    echo "Let's Encrypt renewal: certbot.timer"
+  fi
   echo "TLS certificate fingerprint:"
   openssl x509 -in /etc/vinted-ipv6/tls/server.crt -noout \
     -fingerprint -sha256
-  echo "Open management port $IPV6_MANAGEMENT_PORT and the required proxy ports"
-  echo "in your provider firewall; this installer does not change firewall rules."
+  if (( trusted_https_ready == 1 )); then
+    echo "Open TCP ports 80 and 443 plus the required proxy ports"
+    echo "in your provider firewall. Port $IPV6_MANAGEMENT_PORT is only the emergency fallback."
+  else
+    echo "Open management port $IPV6_MANAGEMENT_PORT and the required proxy ports"
+    echo "in your provider firewall; this installer does not change provider firewall rules."
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
