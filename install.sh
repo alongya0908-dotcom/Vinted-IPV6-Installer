@@ -5,9 +5,9 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.8.11"
+DEFAULT_VERSION="v1.8.12"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="5feb933d5e1ee2e3045dace84cd6524734161e40792061a57c6b4bb3ed807991"
+DEFAULT_ARCHIVE_SHA256="fdef1e0a1ccc83ddb7f23bb9b9f615b60a7f6ec1ee3bf5ae559893e7c3787647"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -768,8 +768,9 @@ main() {
     public_domain="${public_domain,,}"
     validate_public_domain "$public_domain" ||
       die "Invalid trusted HTTPS domain: $public_domain"
-    # Keep proxy/export URLs on the raw IPv4 fallback until certificate
-    # issuance and the external health check both succeed.
+    # The trusted HTTPS host starts on the raw IPv4 fallback. Proxy
+    # connections remain on IPV6_PUBLIC_IPV4 after certificate provisioning;
+    # only buyer, traffic and refresh links switch to this domain.
     IPV6_PUBLIC_HOST="$IPV6_PUBLIC_IPV4"
   else
     IPV6_PUBLIC_HOST="$IPV6_PUBLIC_IPV4"
