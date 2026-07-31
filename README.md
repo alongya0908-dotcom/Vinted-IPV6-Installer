@@ -1,7 +1,7 @@
 # Vinted IPv6 一键安装器
 
 这是 Vinted IPv6 代理控制台的公开、无源码安装分发仓库。安装器固定到
-`v1.8.17` 运行包及其 SHA-256，校验失败会立即停止，不会安装未知文件。
+`v1.8.18` 运行包及其 SHA-256，校验失败会立即停止，不会安装未知文件。
 
 ## 一键安装或升级
 
@@ -25,4 +25,4 @@ VINTED_IPV6_ASSUME_YES=1 bash <(curl -fsSL https://raw.githubusercontent.com/alo
 ```
 
 版本化运行包与校验文件见
-[v1.8.17 Release](https://github.com/alongya0908-dotcom/Vinted-IPV6-Installer/releases/tag/v1.8.17)。
+[v1.8.18 Release](https://github.com/alongya0908-dotcom/Vinted-IPV6-Installer/releases/tag/v1.8.18)。
