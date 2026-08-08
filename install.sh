@@ -8,9 +8,9 @@ set -euo pipefail
 # The source installer is intentionally unpinned. build_release_package.sh
 # replaces this line in each immutable release installer. A raw/network copy
 # must never silently select an obsolete release.
-DEFAULT_VERSION="v1.9.7"
+DEFAULT_VERSION="v1.9.8"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="7cc3ae2b8b2ac03c4917935e106fb8ef12dce473cdd6f3a1d2fb82283df8690e"
+DEFAULT_ARCHIVE_SHA256="efe9c3fd05160188fd15a83c5380cc141bb9fd50c2041ccc2332a3a82214a8c8"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -498,6 +498,15 @@ read_route_guard_value() {
   awk -F= -v wanted="$key" '$1 == wanted { print $2; exit }' "$file"
 }
 
+saved_onlink_for_route() {
+  local saved_gateway="${1,,}" selected_gateway="${2,,}"
+  local saved_interface="$3" selected_interface="$4" saved_onlink="$5"
+  [[ -n "$saved_gateway" && "$saved_gateway" == "$selected_gateway" &&
+     -n "$saved_interface" && "$saved_interface" == "$selected_interface" ]] ||
+    return 0
+  printf '%s\n' "$saved_onlink"
+}
+
 extract_default_interface() {
   awk '{
       for (field_index = 1; field_index <= NF; field_index++) {
@@ -803,8 +812,9 @@ main() {
   ip link show dev "$IPV6_INTERFACE" >/dev/null 2>&1 ||
     die "Network interface does not exist: $IPV6_INTERFACE"
 
-  default_value="$(read_route_guard_value gateway 2>/dev/null || true)"
-  default_value="${default_value:-$(detect_ipv6_gateway "$IPV6_INTERFACE")}"
+  saved_interface="$(read_route_guard_value interface 2>/dev/null || true)"
+  saved_gateway="$(read_route_guard_value gateway 2>/dev/null || true)"
+  default_value="${saved_gateway:-$(detect_ipv6_gateway "$IPV6_INTERFACE")}"
   if (( current_install == 1 )); then
     IPV6_GATEWAY="${IPV6_GATEWAY:-$default_value}"
     [[ -n "$IPV6_GATEWAY" ]] ||
@@ -819,6 +829,15 @@ main() {
   IPV6_GATEWAY_METRIC="${IPV6_GATEWAY_METRIC:-${default_value:-100}}"
   validate_route_metric "$IPV6_GATEWAY_METRIC" ||
     die "IPV6_GATEWAY_METRIC must be between 0 and 65535."
+  saved_onlink="$(read_route_guard_value onlink 2>/dev/null || true)"
+  default_value="$(saved_onlink_for_route \
+    "$saved_gateway" "$IPV6_GATEWAY" \
+    "$saved_interface" "$IPV6_INTERFACE" "$saved_onlink")"
+  IPV6_GATEWAY_ONLINK="${IPV6_GATEWAY_ONLINK:-$default_value}"
+  if [[ -n "$IPV6_GATEWAY_ONLINK" ]]; then
+    validate_boolean "$IPV6_GATEWAY_ONLINK" ||
+      die "IPV6_GATEWAY_ONLINK must be 0 or 1."
+  fi
 
   default_value="$(detect_public_ipv4)"
   if (( current_install == 1 )); then
@@ -1104,7 +1123,7 @@ main() {
       ROUTE_GUARD_SOURCE ROUTE_GUARD_SERVICE_SOURCE ROUTE_GUARD_TIMER_SOURCE
     export \
       IPV6_PUBLIC_IPV4 IPV6_PREFIXES IPV6_INTERFACE IPV6_LISTEN \
-      IPV6_GATEWAY IPV6_GATEWAY_METRIC \
+      IPV6_GATEWAY IPV6_GATEWAY_METRIC IPV6_GATEWAY_ONLINK \
       IPV6_PUBLIC_HOST \
       IPV6_PORT_MIN IPV6_PORT_MAX IPV6_SUBNET_START IPV6_ADMIN_PATH \
       IPV6_RESERVED_PORTS IPV6_ADMIN_USER IPV6_ADMIN_PASSWORD
