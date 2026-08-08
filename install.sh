@@ -5,9 +5,12 @@ set -euo pipefail
 # release, verifies it before mutation, then delegates to the transactional
 # install_admin_console.sh contained in that release.
 
-DEFAULT_VERSION="v1.9.5"
+# The source installer is intentionally unpinned. build_release_package.sh
+# replaces this line in each immutable release installer. A raw/network copy
+# must never silently select an obsolete release.
+DEFAULT_VERSION="v1.9.6"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="6bd2e9af6211f910c063b235d1eca341cb0d9d8d29155da94c828f57dd4b1b2d"
+DEFAULT_ARCHIVE_SHA256="4e176e01a468552f85908d5b847d2925244b60a3ceabbf1ec642613179fb85e4"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
@@ -247,10 +250,22 @@ validate_subnet_start() {
     (( 16#$value >= 1 && 16#$value <= 65535 ))
 }
 
+validate_ipv6_gateway() {
+  local value="${1,,}"
+  [[ "$value" =~ ^[0-9a-f:]{2,39}$ && "$value" == *:* ]]
+}
+
+validate_route_metric() {
+  [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 <= 65535 ))
+}
+
 validate_admin_path() {
   local lower="${1,,}"
   [[ "$1" =~ ^/[A-Za-z0-9_-]{1,128}$ ]] &&
-    [[ "$lower" != "/api" && "$lower" != "/healthz" ]]
+    [[ "$lower" != "/api" && "$lower" != "/healthz" &&
+       "$lower" != "/livez" && "$lower" != "/readyz" &&
+       "$lower" != "/traffic" && "$lower" != "/refresh" &&
+       "$lower" != "/client" ]]
 }
 
 validate_reserved_ports() {
@@ -325,6 +340,9 @@ validate_archive_entries() {
       deployment/install_admin_console.sh|\
       deployment/rollback_admin_console.sh|\
       deployment/systemd_env.sh|\
+      deployment/vinted-ipv6-route-guard.sh|\
+      deployment/vinted-ipv6-route-guard.service|\
+      deployment/vinted-ipv6-route-guard.timer|\
       deployment/vinted-ipv6.service|\
       deployment/verify_ipv6_prefix.sh|\
       release-files.sha256|\
@@ -354,6 +372,9 @@ verify_payload() {
     deployment/install_admin_console.sh
     deployment/rollback_admin_console.sh
     deployment/systemd_env.sh
+    deployment/vinted-ipv6-route-guard.sh
+    deployment/vinted-ipv6-route-guard.service
+    deployment/vinted-ipv6-route-guard.timer
     deployment/verify_ipv6_prefix.sh
     deployment/vinted-ipv6.service
     web/app.js
@@ -379,6 +400,9 @@ verify_payload() {
     deployment/install_admin_console.sh \
     deployment/rollback_admin_console.sh \
     deployment/systemd_env.sh \
+    deployment/vinted-ipv6-route-guard.sh \
+    deployment/vinted-ipv6-route-guard.service \
+    deployment/vinted-ipv6-route-guard.timer \
     deployment/vinted-ipv6.service \
     deployment/verify_ipv6_prefix.sh \
     release-files.sha256 \
@@ -468,6 +492,12 @@ read_service_value() {
   printf '%s\n' "$value"
 }
 
+read_route_guard_value() {
+  local key="$1" file="/etc/vinted-ipv6/route-guard.conf"
+  [[ -r "$file" ]] || return 1
+  awk -F= -v wanted="$key" '$1 == wanted { print $2; exit }' "$file"
+}
+
 extract_default_interface() {
   awk '{
       for (field_index = 1; field_index <= NF; field_index++) {
@@ -481,6 +511,24 @@ extract_default_interface() {
 
 detect_interface() {
   ip -4 route show default 2>/dev/null | extract_default_interface
+}
+
+detect_ipv6_gateway() {
+  local network_interface="$1"
+  ip -6 route show table main default dev "$network_interface" 2>/dev/null |
+    awk '{
+      via=""; proto=""
+      for (i=1; i<=NF; i++) {
+        if ($i == "via" && i < NF) via=$(i+1)
+        if ($i == "proto" && i < NF) proto=$(i+1)
+      }
+      if (via != "" && proto != "ra") gateways[tolower(via)]=1
+    }
+    END {
+      count=0
+      for (gateway in gateways) { result=gateway; count++ }
+      if (count == 1) print result
+    }'
 }
 
 detect_public_ipv4() {
@@ -689,6 +737,8 @@ main() {
   [[ -d /run/systemd/system ]] || die "This installer requires systemd."
   [[ "$(uname -m)" == "x86_64" ]] ||
     die "Only Linux x86_64 is supported; found $(uname -m)."
+  [[ -n "$version" ]] ||
+    die "This source installer is not release-pinned; use a generated release installer or pass --version and --archive-sha256."
   validate_version "$version" || die "Invalid release version: $version"
   validate_repository "$distribution_repository" ||
     die "Invalid distribution repository: $distribution_repository"
@@ -752,6 +802,23 @@ main() {
     die "Invalid network interface name."
   ip link show dev "$IPV6_INTERFACE" >/dev/null 2>&1 ||
     die "Network interface does not exist: $IPV6_INTERFACE"
+
+  default_value="$(read_route_guard_value gateway 2>/dev/null || true)"
+  default_value="${default_value:-$(detect_ipv6_gateway "$IPV6_INTERFACE")}"
+  if (( current_install == 1 )); then
+    IPV6_GATEWAY="${IPV6_GATEWAY:-$default_value}"
+    [[ -n "$IPV6_GATEWAY" ]] ||
+      die "Set IPV6_GATEWAY; no unique non-RA default gateway could be detected."
+  else
+    prompt_value IPV6_GATEWAY "Provider IPv6 default gateway" "$default_value"
+  fi
+  IPV6_GATEWAY="${IPV6_GATEWAY,,}"
+  validate_ipv6_gateway "$IPV6_GATEWAY" ||
+    die "IPV6_GATEWAY must be one IPv6 address without a zone suffix."
+  default_value="$(read_route_guard_value metric 2>/dev/null || true)"
+  IPV6_GATEWAY_METRIC="${IPV6_GATEWAY_METRIC:-${default_value:-100}}"
+  validate_route_metric "$IPV6_GATEWAY_METRIC" ||
+    die "IPV6_GATEWAY_METRIC must be between 0 and 65535."
 
   default_value="$(detect_public_ipv4)"
   if (( current_install == 1 )); then
@@ -924,6 +991,7 @@ main() {
     echo "  Trusted HTTPS:    disabled"
   fi
   echo "  IPv6 interface:   $IPV6_INTERFACE"
+  echo "  IPv6 gateway:     $IPV6_GATEWAY"
   if [[ "$trusted_https" == "1" ]]; then
     echo "  Management URL:   https://$public_domain$IPV6_ADMIN_PATH/"
   else
@@ -960,8 +1028,10 @@ main() {
   DOWNLOAD_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/vinted-ipv6-download.XXXXXXXX")"
   archive_path="$DOWNLOAD_WORK_DIR/$archive_name"
   checksum_path="$DOWNLOAD_WORK_DIR/$checksum_name"
-  curl_download "$checksum_url" "$checksum_path"
-  curl_download "$archive_url" "$archive_path"
+  curl_download "$checksum_url" "$checksum_path" ||
+    die "Unable to download the pinned release checksum; installation was not changed."
+  curl_download "$archive_url" "$archive_path" ||
+    die "Unable to download the pinned release archive; installation was not changed."
 
   read -r expected_count expected_sha < <(awk -v name="$archive_name" '
     $1 ~ /^[0-9a-fA-F]{64}$/ && ($2 == name || $2 == "*" name) {
@@ -1030,9 +1100,11 @@ main() {
 
   set +e
   (
-    unset BINARY_PATH WEB_SOURCE SERVICE_SOURCE ROLLBACK_SOURCE
+    unset BINARY_PATH WEB_SOURCE SERVICE_SOURCE ROLLBACK_SOURCE \
+      ROUTE_GUARD_SOURCE ROUTE_GUARD_SERVICE_SOURCE ROUTE_GUARD_TIMER_SOURCE
     export \
       IPV6_PUBLIC_IPV4 IPV6_PREFIXES IPV6_INTERFACE IPV6_LISTEN \
+      IPV6_GATEWAY IPV6_GATEWAY_METRIC \
       IPV6_PUBLIC_HOST \
       IPV6_PORT_MIN IPV6_PORT_MAX IPV6_SUBNET_START IPV6_ADMIN_PATH \
       IPV6_RESERVED_PORTS IPV6_ADMIN_USER IPV6_ADMIN_PASSWORD
