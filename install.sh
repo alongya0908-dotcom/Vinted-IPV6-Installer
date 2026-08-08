@@ -8,9 +8,9 @@ set -euo pipefail
 # The source installer is intentionally unpinned. build_release_package.sh
 # replaces this line in each immutable release installer. A raw/network copy
 # must never silently select an obsolete release.
-DEFAULT_VERSION="v1.9.6"
+DEFAULT_VERSION="v1.9.7"
 DEFAULT_DISTRIBUTION_REPOSITORY="alongya0908-dotcom/Vinted-IPV6-Installer"
-DEFAULT_ARCHIVE_SHA256="4e176e01a468552f85908d5b847d2925244b60a3ceabbf1ec642613179fb85e4"
+DEFAULT_ARCHIVE_SHA256="7cc3ae2b8b2ac03c4917935e106fb8ef12dce473cdd6f3a1d2fb82283df8690e"
 DOWNLOAD_WORK_DIR=""
 RELEASE_STAGE_DIR=""
 PROMPT_FD=""
